@@ -22,7 +22,9 @@ class DataframeError(Exception):
     """Dataframe conversion error."""
 
 
-def get_dataframe(reader: AnyReader, topicname: str, keys: Sequence[str]) -> pandas.DataFrame:
+def get_dataframe(
+    reader: AnyReader, topicname: str, keys: Sequence[str] = None
+) -> pandas.DataFrame:
     """Convert messages from a topic into a pandas dataframe.
 
     Read all messages from a topic and extract referenced keys into
@@ -34,7 +36,7 @@ def get_dataframe(reader: AnyReader, topicname: str, keys: Sequence[str]) -> pan
     Args:
         reader: Opened rosbags reader.
         topicname: Topic name of messages to process.
-        keys: Field names to get from each message.
+        keys: Field names to get from each message. If set to None, get all available fields.
 
     Raises:
         DataframeError: Reader not opened or topic or field name does not exist.
@@ -45,15 +47,19 @@ def get_dataframe(reader: AnyReader, topicname: str, keys: Sequence[str]) -> pan
     """
     # pylint: disable=too-many-locals
     if not reader.isopen:
-        raise DataframeError('RosbagReader needs to be opened before accessing messages.')
+        raise DataframeError(
+            "RosbagReader needs to be opened before accessing messages."
+        )
 
     if topicname not in reader.topics:
-        raise DataframeError(f'Requested unknown topic {topicname!r}.')
+        raise DataframeError(f"Requested unknown topic {topicname!r}.")
 
     topic = reader.topics[topicname]
     assert topic.msgtype
 
     msgdef = get_msgdef(topic.msgtype, reader.typestore)
+    if keys is None:
+        keys = [f.name for f in msgdef.fields]
 
     def create_plain_getter(key: str) -> Callable[[object], AttrValue]:
         """Create getter for plain attribute lookups."""
@@ -76,20 +82,26 @@ def get_dataframe(reader: AnyReader, topicname: str, keys: Sequence[str]) -> pan
 
     getters = []
     for key in keys:
-        subkeys = key.split('.')
+        subkeys = key.split(".")
         subdef = msgdef
         for subkey in subkeys[:-1]:
             subfield = next((x for x in subdef.fields if x.name == subkey), None)
             if not subfield:
-                raise DataframeError(f'Field {subkey!r} does not exist on {subdef.name!r}.')
+                raise DataframeError(
+                    f"Field {subkey!r} does not exist on {subdef.name!r}."
+                )
 
             if subfield.descriptor.valtype != Valtype.MESSAGE:
-                raise DataframeError(f'Field {subkey!r} of {subdef.name!r} is not a message.')
+                raise DataframeError(
+                    f"Field {subkey!r} of {subdef.name!r} is not a message."
+                )
 
             subdef = subfield.descriptor.args
 
         if subkeys[-1] not in {x.name for x in subdef.fields}:
-            raise DataframeError(f'Field {subkeys[-1]!r} does not exist on {subdef.name!r}.')
+            raise DataframeError(
+                f"Field {subkeys[-1]!r} does not exist on {subdef.name!r}."
+            )
 
         if len(subkeys) == 1:
             getters.append(create_plain_getter(subkeys[0]))
